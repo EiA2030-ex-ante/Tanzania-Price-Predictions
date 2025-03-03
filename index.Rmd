@@ -1,0 +1,2272 @@
+---
+title: "Predictive mapping of wholesale grain prices for rural areas in Tanzania"
+author: "Madaga Lavinia, Jordan Chamberlin"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+css: styles.css
+---
+
+<div class="custom-citation">
+Suggested citation: 
+Madaga, Lavinia, Jordan Chamberlin, Bisrat Gebrekidan, Robert Hijmans, Nicholaus Kuboja, and Maxwell Mkondiwa. 2024. “Predictive mapping of wholesale grain prices for rural areas in Tanzania.” https://github.com/EiA2030-ex-ante/Tanzania-Price-Data
+</div>
+
+# Introduction
+
+We are interested in estimating the prices of agricultural food commodities across space and time, on the basis of prices as observed at some market locations. Here we explore methods to model these prices, using monthly data from across Tanzania over the period May 2021-July 2024.
+
+This document describes the process of fitting a Random Forest model to predict these prices. The performance of the Random Forest model is evaluated using Root Mean Square Errors (RMSE) and R-Square as test statistics. We also compare the observed prices with the predicted prices using an out of sample dataset.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) 
+```
+
+# Load Libraries
+
+```{r, message=FALSE}
+library(geodata)
+library(lubridate)
+library(terra)
+library(data.table)
+library(randomForest)
+library(httr)
+library(caret)
+library(Metrics)
+library(pdp)
+library(gridExtra)
+library(stats)
+library(dplyr)
+library(stringr)
+library(fields)
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(gdistance)
+library(sp)
+library(raster)
+library(foreign)
+library(gdistance)
+```
+
+# Data
+This dataset contains price information for various crops across different regions and markets in Tanzania from 2021 to 2024. The data was acquired from Tanzania's Ministry of Industry and Trade.
+```{r}
+setwd("H:/Tanzania Price data/Datasets")
+
+prices <- fread("Tanzania_Price_Data_AllCrops_with_Coordinates4.csv")
+dim(prices)
+head(prices)
+table(prices$Market)
+sapply(prices, class)
+```
+
+
+```{r}
+# Convert to date format
+prices$Date <- lubridate::mdy(prices$Date)
+```
+
+## Basic Data preperation
+
+Check the Region and Market names and coodinates.
+Make sure the Region and Market names are harmonized and properly geocoded
+```{r}
+unique(prices[Region=="Arusha",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Dar es Salaam",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Dodoma",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Kagera",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Manyara",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Rukwa",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Mpanda",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Mtwara",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Tabora",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Tanga",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Iringa",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Kigoma",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Morogoro",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Mwanza",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Mara",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Ruvuma",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Shinyanga",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Kilimanjaro",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Mbeya",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Katavi",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Njombe",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Lindi",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Singida",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Pwani",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Simiyu",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Geita",.(Market, Latitude, Longitude)])
+unique(prices[Region=="Songwe",.(Market, Latitude, Longitude)])
+```
+
+
+
+```{r}
+setnames(prices, old = "Maize..min.price.", new = "mai.price.min")
+setnames(prices, old = "Rice..min.price.", new = "ric.price.min")
+setnames(prices, old = "Sorghum..min.price.", new = "sor.price.min")
+setnames(prices, old = "Bulrush.Millet..min.price.", new = "bul.price.min")
+setnames(prices, old = "Finger.Millet..min.price.", new = "fin.price.min")
+setnames(prices, old = "Wheat..min.price.", new = "whe.price.min")
+setnames(prices, old = "Beans..min.price.", new = "bea.price.min")
+setnames(prices, old = "Irish.Potatoes..min.price.", new = "pot.price.min")
+setnames(prices, old = "Maize..max.price.", new = "mai.price.max")
+setnames(prices, old = "Rice..max.price.", new = "ric.price.max")
+setnames(prices, old = "Sorghum..max.price.", new = "sor.price.max")
+setnames(prices, old = "Bulrush.Millet..max.price.", new = "bul.price.max")
+setnames(prices, old = "Finger.Millet..max.price.", new = "fin.price.max")
+setnames(prices, old = "Wheat..max.price.", new = "whe.price.max")
+setnames(prices, old = "Beans..max.price.", new = "bea.price.max")
+setnames(prices, old = "Irish.Potatoes..max.price.", new = "pot.price.max")
+```
+
+```{r}
+sapply(prices, class)
+```
+
+```{r}
+#convert prices to numeric 
+prices$mai.price.min <- as.numeric(prices$mai.price.min)
+prices$ric.price.min <- as.numeric(prices$ric.price.min)
+prices$sor.price.min <- as.numeric(prices$sor.price.min)
+prices$bul.price.min <- as.numeric(prices$bul.price.min)
+prices$fin.price.min <- as.numeric(prices$fin.price.min)
+prices$whe.price.min <- as.numeric(prices$whe.price.min)
+prices$bea.price.min <- as.numeric(prices$bea.price.min)
+prices$pot.price.min <- as.numeric(prices$pot.price.min)
+
+prices$mai.price.max <- as.numeric(prices$mai.price.max)
+prices$ric.price.max <- as.numeric(prices$ric.price.max)
+prices$sor.price.max <- as.numeric(prices$sor.price.max)
+prices$bul.price.max <- as.numeric(prices$bul.price.max)
+prices$fin.price.max <- as.numeric(prices$fin.price.max)
+prices$whe.price.max <- as.numeric(prices$whe.price.max)
+prices$bea.price.max <- as.numeric(prices$bea.price.max)
+prices$pot.price.max <- as.numeric(prices$pot.price.max)
+
+sapply(prices, class)
+```
+
+```{r}
+# convert to price per kg
+prices$mai.price.min <- prices$mai.price.min/100
+prices$ric.price.min <- prices$ric.price.min/100
+prices$sor.price.min <- prices$sor.price.min/100
+prices$bul.price.min <- prices$bul.price.min/100
+prices$fin.price.min <- prices$fin.price.min/100
+prices$whe.price.min <- prices$whe.price.min/100
+prices$bea.price.min <- prices$bea.price.min/100
+prices$pot.price.min <- prices$pot.price.min/100
+
+prices$mai.price.max <- prices$mai.price.max/100
+prices$ric.price.max <- prices$ric.price.max/100
+prices$sor.price.max <- prices$sor.price.max/100
+prices$bul.price.max <- prices$bul.price.max/100
+prices$fin.price.max <- prices$fin.price.max/100
+prices$whe.price.max <- prices$whe.price.max/100
+prices$bea.price.max <- prices$bea.price.max/100
+prices$pot.price.max <- prices$pot.price.max/100
+```
+
+```{r}
+# calculate average of min and max
+prices$mai.price <- (prices$mai.price.min + prices$mai.price.max) / 2
+prices$ric.price <- (prices$ric.price.min + prices$ric.price.max) / 2
+prices$sor.price <- (prices$sor.price.min + prices$sor.price.max) / 2
+prices$bul.price <- (prices$bul.price.min + prices$bul.price.max) / 2
+prices$fin.price <- (prices$fin.price.min + prices$fin.price.max) / 2
+prices$whe.price <- (prices$whe.price.min + prices$whe.price.max) / 2
+prices$bea.price <- (prices$bea.price.min + prices$bea.price.max) / 2
+prices$pot.price <- (prices$pot.price.min + prices$pot.price.max) / 2
+```
+
+```{r}
+#We can add dates by using the year and the month names
+prices$Day   <- day(prices$Date)
+prices$Month <- month(prices$Date)
+prices$Year  <- year(prices$Date)
+```
+
+```{r}
+# drop unneccessary columns
+prices <- prices[,!c("mai.price.min", "mai.price.max",
+                     "ric.price.min", "ric.price.max",
+                     "sor.price.min", "sor.price.max",
+                     "bul.price.min", "bul.price.max",
+                     "fin.price.min", "fin.price.max",
+                     "whe.price.min", "whe.price.max", 
+                     "bea.price.min", "bea.price.max", 
+                     "pot.price.min", "pot.price.max")]
+```
+
+```{r}
+# calculate monthly mean prices by market 
+prices.monthly <- prices[, .(mai.price = mean(mai.price, na.rm = TRUE), 
+           ric.price = mean(ric.price, na.rm = TRUE), 
+           sor.price = mean(sor.price, na.rm = TRUE), 
+           bul.price = mean(bul.price, na.rm = TRUE),
+           fin.price = mean(fin.price, na.rm = TRUE), 
+           whe.price = mean(whe.price, na.rm = TRUE), 
+           bea.price = mean(bea.price, na.rm = TRUE), 
+           pot.price = mean(pot.price, na.rm = TRUE)), 
+       by=.(Region, Market, Month, Year, Latitude, Longitude)]
+```
+
+```{r}
+# reshape to long (so that prices for different commodities can be simultaneously estimated)
+prices.monthly 
+prices.monthly.long <- melt(prices.monthly, id.vars=c('Region', 'Market', 'Month', 'Year', 'Latitude', 'Longitude'),)
+```
+
+```{r}
+# rename columns
+setnames(prices.monthly.long, old="variable", new="Crop")
+setnames(prices.monthly.long, old="value", new="pkg")
+```
+
+```{r}
+# replace crop names
+prices.monthly.long[Crop == "mai.price", Crop := "Maize"]
+prices.monthly.long[Crop == "ric.price", Crop := "Rice"]
+prices.monthly.long[Crop == "sor.price", Crop := "Sorghum"]
+prices.monthly.long[Crop == "bul.price", Crop := "B.Millet"]
+prices.monthly.long[Crop == "fin.price", Crop := "F.Millet"]
+prices.monthly.long[Crop == "whe.price", Crop := "Wheat"]
+prices.monthly.long[Crop == "bea.price", Crop := "Beans"]
+prices.monthly.long[Crop == "pot.price", Crop := "Potato"]
+```
+
+```{r}
+# Reset the factor levels to updated levels
+prices.monthly.long[, Crop := factor(Crop)]
+# Check the unique values again
+unique(prices.monthly.long$Crop)
+```
+
+```{r}
+# generate dummies to use in place of factors (for later spatial predictions, which are struggling with factors)
+prices.monthly.long[, maize   := ifelse(Crop == "Maize",1,0)]
+prices.monthly.long[, rice    := ifelse(Crop == "Rice",1,0)]
+prices.monthly.long[, sorghum := ifelse(Crop == "Sorghum",1,0)]
+prices.monthly.long[, bmillet := ifelse(Crop == "B.Millet",1,0)]
+prices.monthly.long[, fmillet := ifelse(Crop == "F.Millet",1,0)]
+prices.monthly.long[, wheat   := ifelse(Crop == "Wheat",1,0)]
+prices.monthly.long[, beans   := ifelse(Crop == "Beans",1,0)]
+prices.monthly.long[, potato  := ifelse(Crop == "Potato",1,0)]
+```
+
+```{r}
+prices.monthly.long[, jan := ifelse(Month == 1  , 1, 0)]
+prices.monthly.long[, feb := ifelse(Month == 2  , 1, 0)]
+prices.monthly.long[, mar := ifelse(Month == 3  , 1, 0)]
+prices.monthly.long[, apr := ifelse(Month == 4  , 1, 0)]
+prices.monthly.long[, may := ifelse(Month == 5  , 1, 0)]
+prices.monthly.long[, jun := ifelse(Month == 6  , 1, 0)]
+prices.monthly.long[, jul := ifelse(Month == 7  , 1, 0)]
+prices.monthly.long[, aug := ifelse(Month == 8  , 1, 0)]
+prices.monthly.long[, sep := ifelse(Month == 9  , 1, 0)]
+prices.monthly.long[, oct := ifelse(Month == 10 , 1, 0)]
+prices.monthly.long[, nov := ifelse(Month == 11 , 1, 0)]
+prices.monthly.long[, dec := ifelse(Month == 12 , 1, 0)]
+```
+
+```{r}
+# replace NaN with NAs in the price observations
+prices.monthly.long[is.nan(pkg), pkg := NA]
+# Remove observations with missing observations
+prices.monthly.long <- na.omit(prices.monthly.long)
+```
+
+```{r}
+# bring in raster stack as predictors
+geodata_path("H:/Tanzania Price data/Datasets/geodata")
+list.files("H:/Tanzania Price data/Datasets/geodata", recursive=TRUE)
+```
+
+```{r}
+# tza0 <- gadm(country="TZA", level=0)
+# tza1 <- gadm(country="TZA", level=1)
+# tza2 <- gadm(country="TZA", level=2)
+# tza3 <- gadm(country="TZA", level=3)
+
+tza0 <- readRDS("H:/Tanzania Price data/Datasets/geodata/TRUE/gadm/gadm41_TZA_0_pk.rds")
+tza1 <- readRDS("H:/Tanzania Price data/Datasets/geodata/TRUE/gadm/gadm41_TZA_1_pk.rds")
+tza2 <- readRDS("H:/Tanzania Price data/Datasets/geodata/TRUE/gadm/gadm41_TZA_2_pk.rds")
+tza3 <- readRDS("H:/Tanzania Price data/Datasets/geodata/TRUE/gadm/gadm41_TZA_3_pk.rds")
+```
+
+```{r}
+# convert prices observations to vector for mapping
+mypts <- vect(prices.monthly.long, geom=c("Longitude", "Latitude"), crs=crs(tza0), keepgeom=TRUE)
+
+# see if these show up correctly
+plot(tza1)
+plot(mypts, col="Red", add=TRUE)
+# text(mypts, label="Market")
+```
+
+```{r}
+# create reference raster
+tza_extent <- ext(tza1) |> floor()
+r <- crop(rast(res=1/12), tza_extent)
+```
+
+# Interpolate
+```{r}
+## Interpolate
+
+#xy <- as.matrix(mypts[,c("Longitude", "Latitude")])
+xy <- geom(mypts)[,c("y","x")]
+#tps <- Tps(xy, p$spatial)
+tps <- Tps(xy, mypts$pkg)
+sp <- interpolate(r, tps)
+sp <- mask(sp, tza1)
+plot(sp)
+lines(tza1)
+```
+
+## Predict prices with coodinates only
+```{r}
+## Predict Maize prices with coodinates only
+maize_mypts <- mypts[mypts$Crop == "Maize", ]
+rf <- randomForest(pkg ~ Longitude + Latitude , data=maize_mypts)
+sp3 <- interpolate(r, rf, xyNames=c("Longitude", "Latitude"))
+sp3 <- mask(sp3, tza1)
+plot(sp3)
+lines(tza1)
+```
+
+## Covariates
+The covariates used include a mix of crop-specific indicators, temporal variables to capture monthly and yearly effects, geographical coordinates, accessibility measures, climatic conditions, and lagged rainfall to account for delayed effects of weather on crop prices. 
+```{r}
+ttcity <- rast("H:/Tanzania Price data/Datasets/geodata/TRUE/travel/travel_time_to_cities_u5.tif")
+ttport <- rast("H:/Tanzania Price data/Datasets/geodata/TRUE/travel/travel_time_to_ports_1.tif")
+clm    <- rast("H:/Tanzania Price data/Datasets/geodata/TRUE/wc2.1_country/TZA_wc2.1_30s_bio.tif")
+area   <- rast("H:/Tanzania Price data/Datasets/geodata/TRUE/spam/spam2017V2r1_SSA_H_MAIZ_A.tif")
+yield  <- rast("H:/Tanzania Price data/Datasets/geodata/TRUE/spam/spam2017V2r1_SSA_Y_MAIZ_R.tif")
+popd  <- rast("gpw_v4_population_density_rev11_2020_10m.tif")
+```
+
+```{r}
+names(ttcity) <- c("ttcity_u5") ## travel time cities of 100k or more
+names(ttport) <- c("ttport_1") ## travel time to major ports
+names(clm) <- gsub("wc2.1_30s_", "", names(clm))
+names(area) <- c("MAI_ARE") # SPAM maize area 2010
+names(yield)  <- c("MAI_YLD") # SPAM maize yield 2010
+names(popd)  <- c("popdens") # GPW4
+
+comment(ttcity) <- "travel time to cities 100k or more"
+comment(ttport) <- "travel time to major ports"
+
+comment(popd) <- "population density 2020 (GPW4 @ 10dm)"
+
+comment(clm)[1] <-"BIO1 = Annual Mean Temperature"
+comment(clm)[2] <-"BIO2 = Mean Diurnal Range (Mean of monthly (max temp - min temp))"
+comment(clm)[3] <-"BIO3 = Isothermality (BIO2/BIO7) (×100)"
+comment(clm)[4] <-"BIO4 = Temperature Seasonality (standard deviation ×100)"
+comment(clm)[5] <-"BIO5 = Max Temperature of Warmest Month"
+comment(clm)[6] <-"BIO6 = Min Temperature of Coldest Month"
+comment(clm)[7] <-"BIO7 = Temperature Annual Range (BIO5-BIO6)"
+comment(clm)[8] <-"BIO8 = Mean Temperature of Wettest Quarter"
+comment(clm)[9] <-"BIO9 = Mean Temperature of Driest Quarter"
+comment(clm)[10] <-"BIO10 = Mean Temperature of Warmest Quarter"
+comment(clm)[11] <-"BIO11 = Mean Temperature of Coldest Quarter"
+comment(clm)[12] <-"BIO12 = Annual Precipitation"
+comment(clm)[13] <-"BIO13 = Precipitation of Wettest Month"
+comment(clm)[14] <-"BIO14 = Precipitation of Driest Month"
+comment(clm)[15] <-"BIO15 = Precipitation Seasonality (Coefficient of Variation)"
+comment(clm)[16] <-"BIO16 = Precipitation of Wettest Quarter"
+comment(clm)[17] <-"BIO17 = Precipitation of Driest Quarter"
+comment(clm)[18] <-"BIO18 = Precipitation of Warmest Quarter"
+comment(clm)[19] <-"BIO19 = Precipitation of Coldest Quarter"
+```
+
+## Harmonize rasters to national boundaries and common resolution
+```{r}
+ttcity <- resample(ttcity, r)
+ttport <- resample(ttport, r)
+clm    <- resample(clm, r)
+area   <- resample(area, r)
+popd   <- resample(popd, r)
+freq(is.na(area))
+area <- classify(area, cbind(NA,0)) 
+yield  <- resample(yield, r)
+freq(is.na(yield))
+yield <- classify(yield, cbind(NA,0)) 
+# check again 
+compareGeom(ttcity, ttport, clm, area, yield, popd)
+```
+
+## Generate Latitude and Longitude grid
+```{r}
+
+latgrd <- longrd <- r
+latgrd[] <- yFromCell(latgrd, 1:ncell(latgrd))
+longrd[] <- xFromCell(longrd, 1:ncell(longrd))
+names(latgrd) <- c("latitude")
+names(longrd) <- c("longitude")
+```
+
+## Prepare Predictor Stack
+```{r}
+rstack <- c(ttcity, ttport, clm, area, yield, popd, latgrd, longrd)
+names(rstack)
+```
+
+
+```{r}
+# create focal mean to extract from (as alternative to using buffers for extraction, which are not supported in terra)
+fm <- focalMat(r, d=0.18, type='circle', fillNA=FALSE)
+rstack2 <- focal(rstack, w=fm, fun="mean", na.policy="all", fillvalue=NA, # na.rm=TRUE,
+                 expand=TRUE, silent=FALSE) #, filename="", overwrite=FALSE) 
+```
+
+```{r}
+# extract values to dataset -- use a 20km buffer
+# do a focal sum of 20km radius  - this is about 0.18 of a decimal degree... 0.18*112=20.16
+fm <- focalMat(r, d=0.18, type='circle', fillNA=FALSE)
+rstack2 <- focal(rstack2, w=fm, fun="sum", na.policy="all", fillvalue=NA, na.rm=TRUE,
+                 expand=TRUE, silent=FALSE) #, filename="", overwrite=FALSE) 
+```
+
+# Lag Rainfall 
+## Bring in Rainfall Data from Chirps
+```{r}
+chirps_path <- "H:/Tanzania Price data/chirps_data"
+
+chirps_files <- list.files(chirps_path, pattern = ".tif$", full.names = TRUE)
+
+# Read all CHIRPS data files into a SpatRaster collection
+chirps_rasters <- rast(chirps_files)
+
+#crop to Tanzania boundary
+Chirps_Tz <- crop(chirps_rasters, tza1)
+
+writeRaster(Chirps_Tz, "Tz_chirps_monthly_croped.tif", overwrite=TRUE)
+
+Tz_chirps_monthly <- terra::rast("Tz_chirps_monthly_croped.tif")
+Tz_chirps_monthly
+
+#Replace -9999 with NA
+Tz_chirps_monthly <- classify(Tz_chirps_monthly, cbind(-9999,NA))
+
+#extract layer names
+layer_names <- names(Tz_chirps_monthly)
+layer_names
+
+# We need to create a sequence of dates from the layer names
+# Extract year and month from layer names and convert to Date
+dates <- as.Date(paste0(sub("chirps-v2.0\\.", "", layer_names), "-01"), format = "%Y.%m-%d")
+dates
+
+# Assign these dates to the SpatRaster object
+time(Tz_chirps_monthly) <- dates
+
+#rename the layers to the formatted dates
+names(Tz_chirps_monthly) <- dates
+
+# Check the SpatRaster object
+print(Tz_chirps_monthly)
+```
+
+```{r}
+# do a focal mean of 100km radius - this is about 0.9 of a decimal degree... 0.9009*112=100.9008
+# Calculate the focal mean for each layer (month)
+fm_r <- focalMat(Tz_chirps_monthly, d=0.9, type='circle', fillNA=FALSE)
+Rainfall_focal_sum_100km <- focal(Tz_chirps_monthly, w=fm_r, fun="mean", na.policy="all", fillvalue=NA, na.rm=TRUE,
+                                  expand=TRUE, silent=FALSE)
+# Check the result
+Rainfall_focal_sum_100km
+Rainfall <- Rainfall_focal_sum_100km
+```
+
+```{r}
+#Resample 
+Rainfall_res <- resample(Rainfall, r)
+Rainfall_res
+```
+
+## Define a function to calculate the 6-month lagged sum of rainfall values.
+Here we define function that calculates 6 month lag sum of rainfall for each month in our data. The output is raster datsets.
+```{r}
+calculate_lagged_sum <- function(raster_stack, num_months = 6) {
+  # Get the time vector from the raster stack
+  time_vector <- time(raster_stack)
+  
+  # Initialize list to store lagged sum rasters
+  lagged_sum_rasters <- vector("list", length(time_vector))
+  
+  # Loop through each layer in the raster stack
+  for (i in seq_along(time_vector)) {
+    if (i > num_months) {  # We need at least 'num_months' previous layers to calculate the lagged sum
+      # Determine the start and end dates for the lag period
+      end_date <- time_vector[i] # Date of the current layer being processed
+      start_date <- end_date %m-% months(num_months) #The date num_months before the end_date
+      
+      # Select the layers that fall within the lag period
+      lag_period_layers <- raster_stack[[which(time_vector > start_date & time_vector <= end_date)]]
+      
+      # Calculate the sum of the selected layers
+      if (nlyr(lag_period_layers) == num_months) {
+        lagged_sum_rasters[[i]] <- sum(lag_period_layers, na.rm = TRUE)
+      } else {
+        lagged_sum_rasters[[i]] <- rast(nrow = nrow(raster_stack), ncol = ncol(raster_stack), 
+                                        crs = crs(raster_stack), ext = ext(raster_stack), 
+                                        vals = NA)  # Use an empty raster with NA values
+      }
+    } else {
+      lagged_sum_rasters[[i]] <- rast(nrow = nrow(raster_stack), ncol = ncol(raster_stack), 
+                                      crs = crs(raster_stack), ext = ext(raster_stack), 
+                                      vals = NA)  # Use an empty raster with NA values
+    }
+  }
+  
+  # Combine the lagged sum rasters into a single raster stack, excluding empty rasters
+  lagged_sum_stack <- rast(lagged_sum_rasters)
+  
+  # Set the names for the layers in the lagged sum stack
+  names(lagged_sum_stack) <- names(raster_stack)[!is.na(lagged_sum_rasters)]
+  
+  return(lagged_sum_stack)
+}
+
+# Calculate the 6-month lagged sum for each period in the raster stack
+lagged_rainfall_sum <- calculate_lagged_sum(Rainfall_res, num_months = 6)
+
+# Remove the first 6 layers from the raster stack since they are empty
+lagged_rainfall_sum_filtered <- lagged_rainfall_sum[[7:nlyr(lagged_rainfall_sum)]]
+# check the result
+print(lagged_rainfall_sum_filtered)
+
+names(lagged_rainfall_sum_filtered) <- paste0(names(lagged_rainfall_sum_filtered), "_rain.sum.lag")
+
+plot(lagged_rainfall_sum_filtered)
+```
+
+
+```{r}
+## We'll have to include lagged_rainfall_sum_filtered in the predictor stack.
+rstack
+#names(rstack)
+```
+
+```{r}
+rstack3 <- c(rstack, lagged_rainfall_sum_filtered)
+names(rstack3)
+```
+
+```{r}
+#Extract to the point dataset
+extr1 <- terra::extract(rstack3, mypts, method = "bilinear")
+mypts <- cbind(mypts, extr1)
+# Remove the ID column from the dataset
+mypts <- mypts[, !names(mypts) %in% "ID"]
+```
+
+
+Here we extract sum of lag rainfall for each row under the column rain.sum.lag
+```{r}
+mypts_df <- as.data.frame(mypts)
+
+# Define the function to obtain sum of lag rainfall from corresponding rasters to mypts under rain.sum.lag column (for each row)
+# Each extraction has to match the month and year
+get_rain_sum_row <- function(current_date, mypts_row) {
+  # Extract the rainfall value for the current date
+  rain_sum <- mypts_row[[paste0(current_date, "_rain.sum.lag")]]
+  return(rain_sum)
+}
+
+# Loop through each row and obtain the rainfall sum for each month and year
+for (i in 1:nrow(mypts_df)) {
+  # Extract relevant data for the current row
+  month <- mypts_df$Month[i]
+  year <- mypts_df$Year[i]
+  current_date <- paste0(year, "-", sprintf("%02d", month), "-01")  # Format date correctly
+  # Pass necessary data to the function
+  rain_sum <- get_rain_sum_row(current_date, mypts_df[i, ])
+  # Update the rain.sum.lag column
+  mypts_df$rain.sum.lag[i] <- rain_sum
+}
+
+# Update the SpatVector with the new rain.avg column
+mypts$rain.sum.lag <- mypts_df$rain.sum.lag
+```
+
+
+```{r}
+# I'll drop the dates with rain.sum.lag from mypts, seems redundant
+column_indices <- grep("^202[0-4]-", names(mypts))
+mypts <- mypts[, -column_indices]
+names(mypts)
+```
+
+
+```{r}
+#define Month as a factor
+#mypts$Month <- as.factor(mypts$Month)
+#levels(mypts$Month)
+
+#We'll define month as an interger instead.
+# Check to make sure Month is interger
+sapply(mypts, class)
+```
+
+```{r}
+# drop levels that don't exist in Crop field
+mypts$Crop <- mypts$Crop[,drop=TRUE]
+levels(mypts$Crop)
+```
+
+# Linear model price Prediction
+Coefficient estimates from the linear model provide a detailed insight into the relationship between each predictor and the response variable. 
+```{r}
+# Fit the linear model
+lm_model <- lm(pkg ~ maize + rice + sorghum + bmillet + fmillet + wheat + beans + potato +
+                 Month +
+                 Year + 
+                 ttcity_u5 + ttport_1 + 
+                 bio_1 + bio_2 + bio_3 + bio_4 + bio_5 + bio_6 + 
+                 bio_7 + bio_8 + bio_9 + bio_10 + bio_11 + bio_12 + bio_13
+               + bio_14 + bio_15 + bio_16 + bio_17 + bio_18 + bio_19 +
+                 MAI_ARE + MAI_YLD + 
+                 Longitude + Latitude + 
+                 rain.sum.lag,
+               data = mypts)
+
+summary(lm_model)
+```
+
+# RandomForest and TPS
+## Random Forest price prediction
+First check if there are any predictors with NA values
+
+```{r}
+for(column in seq_along(mypts)){
+  if(any(is.na(mypts[column]))){
+    print(paste0("Column: ", colnames(mypts)[column], " has at least one NA value"))
+  }
+}
+
+#There are no columns with missing values
+```
+
+## Split data the to be used for Training and validation 
+Data from May 2021 - Dec 2023 will be used for model training while more recent data from  Jan - June 2024 will be used for Validation.
+```{r}
+mypts <- as.data.frame(mypts)
+
+# Filter the data for training (May 2021 - Dec 2023)
+training_data <- mypts[mypts$Year %in% c(2021, 2022, 2023), ]
+# Check training data
+#head(training_data)
+```
+
+```{r}
+# Filter the data for validation (Jan 2024 - June 2024)
+validation_data <- mypts[mypts$Year == 2024, ]
+# Check validation data
+#head(validation_data)
+```
+
+### Random Forest for generating variable of importance
+
+### Tune The Forest
+The tuneRF function in the randomForest package is used to tune the mtry parameter, which is the number of variables randomly sampled as candidates at each split in the random forest. The function requires a data frame of predictor variables and a response variable.
+
+```{r}
+# Convert training_data data to data frame
+mypts_df <- as.data.frame(training_data)
+
+trf <- tuneRF(x=mypts_df[,1:ncol(mypts_df)], # Prediction variables
+              y=mypts_df$pkg) # Response variable
+```
+
+Based on the output from tuneRF, you can observe that the mtry value that gives the lowest Out-of-Bag (OOB) error. To build the first random forest model, we will use this mtry value.
+```{r}
+(mintree <- trf[which.min(trf[,2]),1])
+```
+
+
+### Fit The Random Forest Model (1)
+#### Random Forest for generating variable of importance
+Here, the model is fitted using the randomForest function to build a predictive model for food commodity prices. The model takes the response variable, the prediction variables and the optimal number of variables to consider at each split. The goal is to generate  Variable importance scores which will help us understand which variables have the most significant impact on the response variable, enabling us to interpret the model and possibly simplify it by focusing on the most important predictors.
+```{r}
+# Create the random forest model
+rf1 <- randomForest(pkg ~ maize + rice + sorghum + bmillet + fmillet + wheat + beans + potato +
+                      Month + 
+                      Year +
+                      ttcity_u5 + ttport_1 + 
+                      bio_1 + bio_2 + bio_3 + bio_4 + bio_5 + bio_6 + 
+                      bio_7 + bio_8 + bio_9 + bio_10 + bio_11 + bio_12 +
+                      bio_13 + bio_14 + bio_15 + bio_16 + bio_17 + 
+                      bio_18 + bio_19 + MAI_ARE + MAI_YLD + 
+                      Longitude + Latitude + 
+                      rain.sum.lag,
+                    data = training_data,mtry=mintree,
+                    importance=TRUE,na.rm=TRUE)
+
+rf1
+```
+
+```{r}
+varImpPlot(rf1)
+```
+
+```{r}
+## evaluate
+(oob <- sqrt(rf1$mse[which.min(rf1$mse)]))
+```
+This calculates the RMSE of the tree in the Random Forest model that has the lowest OOB error. 
+
+
+```{r}
+importance_metrics <- importance(rf1, type=1)  # %IncMSE
+impvar <- rownames(importance_metrics)[order(importance_metrics[, 1], decreasing=TRUE)]
+# Get the top 20 variables
+top_20_vars <- impvar[1:20]
+top_20_vars
+```
+
+```{r}
+node_purity <- importance(rf1, type=2)  # IncNodePurity
+# Sort variables by importance (IncNodePurity)
+node_purity_sorted <- sort(node_purity[,1], decreasing = TRUE)
+# Select the top 20 important variables
+top_vars <- names(node_purity_sorted)[1:20]
+print(top_vars)
+```
+
+```{r}
+rf1$importanceSD
+```
+
+### Fit The Random Forest Model (2)
+#### Estimate more parsimonious specification
+In this section, we aim to refine our model by selecting the most important variables. We will review the importance metrics (%IncMSE and IncNodePurity) to identify the variables that contribute the most to the model's predictive power. Our focus will be on variables with higher importance values to ensure a more efficient and interpretable model.
+```{r}
+# Estimate more parsimonious specification
+rf <- randomForest(pkg ~ maize + rice + sorghum + bmillet + fmillet + wheat + beans + potato +
+                     Month +
+                     Year + 
+                     ttport_1 +
+                     popdens + 
+                     bio_3 + bio_6  + bio_9 + bio_12 + 
+                     rain.sum.lag, 
+                   data=training_data, na.rm=TRUE)
+
+rf
+```
+
+```{r}
+# evaluate
+varImpPlot(rf)
+```
+
+```{r}
+(oob <- sqrt(rf$mse[which.min(rf$mse)]))
+```
+
+```{r}
+partialPlot(rf, as.data.frame(training_data), "rain.sum.lag")
+```
+
+
+## spatial prediction
+These are prediction plots for each food commodities (maize, beans, rice, sorghum, bmillet, fmillet, wheat, potato) with their respective   month of the year 2023.
+
+```{r}
+year <- 2024
+```
+
+Note: we must set the rain.sum.lag variables for each month we are predicting
+
+### Predicted Maize Prices
+```{r}
+#Maize
+# Create an empty list to store predictions for maize
+predict_for_month <- function(month){
+  rain_sum_lag <- rstack3[paste0("2024-", sprintf("%02d", month), "-01_rain.sum.lag")] # Remember to change depending on year
+  names(rain_sum_lag) <- "rain.sum.lag"
+  
+  newstack <- c(rstack, rain_sum_lag)
+  
+  const_maize <- data.frame(
+    maize = 1, rice = 0, sorghum = 0, bmillet = 0, fmillet = 0, wheat = 0, beans = 0, potato = 0,
+    Month = month,
+    Year = year
+  )
+  
+  pred <- predict(newstack, rf, const = const_maize, na.rm = TRUE)
+  pred <- mask(pred, tza1)
+  return(pred)
+}
+
+# Create predictions for all months
+predictions_maize <- lapply(1:10, predict_for_month)
+
+
+# Extract pixel values from predictions_maize
+maize_values <- unlist(lapply(predictions_maize, values))
+# Get min and max values
+min_maize <- min(maize_values, na.rm = TRUE)
+max_maize <- max(maize_values, na.rm = TRUE)
+
+# Define the continuous color palette and reverse it
+color_palette <- rev(terrain.colors(100))
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+
+break_interval <- 100 
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+
+break_interval <- 100
+
+# Create a 3x4 matrix of plots
+par(mar = c(0, 0, 0, 0))  # Set margins to 0 for inner plots
+for (i in 1:10) {
+  plot(predictions_maize[[i]], main = paste("Maize prices", toupper(i), year),
+       zlim = c(min_maize, max_maize), col = color_palette, breaks = seq(min_maize, max_maize, by = break_interval), legend = FALSE, axes = FALSE)
+  # Add region boundaries
+  plot(tza1, add = TRUE, border = "black", lwd = 0.1)
+  
+  points(training_data, pch = 20, col = "red", cex = 0.5)
+}
+
+# Generate pretty breaks for the legend
+legend_breaks <- pretty(c(min_maize, max_maize), n = 4)
+
+# Reset plot layout for the legend
+layout(matrix(1))
+par(mar = c(5, 4, 2, 1))
+
+# Plot the legend in the bottom row, centered horizontally
+image.plot(zlim = c(min_maize, max_maize), legend.only = TRUE,
+           col = color_palette, horizontal = TRUE,
+           legend.width = 0.7, legend.shrink = 0.9,
+           axis.args = list(at = legend_breaks, labels = legend_breaks, cex.axis = 0.9),
+           legend.args = list(text = "Predicted Maize Price (TZS Per Kg)", side = 1, line = 2, cex = 0.9))
+
+```
+
+### Predicted Beans Prices
+```{r}
+# Beans
+# Function to predict beans for a given month
+predict_for_beans <- function(month) {
+  rain_sum_lag <- rstack3[paste0("2024-", sprintf("%02d", month), "-01_rain.sum.lag")]
+  names(rain_sum_lag) <- "rain.sum.lag"
+
+  newstack <- c(rstack, rain_sum_lag)
+
+  const_beans <- data.frame(
+    maize = 0, rice = 0, sorghum = 0, bmillet = 0, fmillet = 0, wheat = 0, beans = 1, potato = 0,
+    Month = month,
+    Year = year
+  )
+
+  pred <- predict(newstack, rf, const = const_beans, na.rm = TRUE)
+  pred <- mask(pred, tza1)
+  return(pred)
+}
+
+# Create predictions for all months
+predictions_beans <- lapply(1:10, predict_for_beans)
+
+# Extract pixel values from predictions_beans
+bean_values <- unlist(lapply(predictions_beans, values))
+min_bean <- min(bean_values, na.rm = TRUE)
+max_bean <- max(bean_values, na.rm = TRUE)
+
+# Define the continuous color palette and reverse it
+color_palette <- rev(terrain.colors(100))
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+
+break_interval <- 150 
+
+# Loop through each month to plot beans prices
+par(mar = c(0, 0, 0, 0))
+for (i in 1:10) {
+  plot(predictions_beans[[i]], main = paste("Beans prices", toupper(i), year), 
+       zlim = c(min_bean, max_bean), col = color_palette, breaks = seq(min_bean, max_bean, by = break_interval), legend = FALSE, axes = FALSE)
+  # Add region boundaries
+  plot(tza1, add = TRUE, border = "black", lwd = 0.1)
+  
+  points(training_data, pch = 20, col = "red", cex = 0.5)
+}
+
+# Generate pretty breaks for the legend
+legend_breaks <- pretty(c(min_bean, max_bean), n = 4)
+
+# Reset plot layout to 1x1 for the legend
+layout(matrix(1))  
+
+# Set margins for the legend
+par(mar = c(5, 4, 2, 1))  
+
+# Plot the legend in the bottom row, centered horizontally
+image.plot(zlim = c(min_bean, max_bean), legend.only = TRUE, 
+           col = color_palette, horizontal = TRUE,
+           legend.width = 0.7, legend.shrink = 0.9, 
+           axis.args = list(at = legend_breaks, labels = legend_breaks, cex.axis = 0.9), 
+           legend.args = list(text = "Predicted Beans Price (Tsh) Per Kg", side = 1, line = 2, cex = 0.9))
+```
+
+### Predicted Rice Prices
+```{r}
+# Rice
+# Function to predict rice prices for a given month
+predict_for_rice <- function(month) {
+  rain_sum_lag <- rstack3[paste0("2024-", sprintf("%02d", month), "-01_rain.sum.lag")]
+  names(rain_sum_lag) <- "rain.sum.lag"
+  
+  newstack <- c(rstack, rain_sum_lag)
+  
+  const_rice <- data.frame(
+    maize = 0, rice = 1, sorghum = 0, bmillet = 0, fmillet = 0, wheat = 0, beans = 0, potato = 0,
+    Month = month,
+    Year = year
+  )
+  
+  pred <- predict(newstack, rf, const = const_rice, na.rm = TRUE)
+  pred <- mask(pred, tza1)
+  return(pred)
+}
+
+# Create predictions for all months
+predictions_rice <- lapply(1:10, predict_for_rice)
+
+# Extract pixel values from predictions_rice
+rice_values <- unlist(lapply(predictions_rice, values))
+min_rice <- min(rice_values, na.rm = TRUE)
+max_rice <- max(rice_values, na.rm = TRUE)
+
+# Define the continuous color palette and reverse it
+color_palette <- rev(terrain.colors(100))
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+
+break_interval <- 150 
+
+# Loop through each month to plot rice prices
+par(mar = c(0, 0, 0, 0))
+for (i in 1:10) {
+  plot(predictions_rice[[i]], main = paste("Rice prices", toupper(i), year), 
+       zlim = c(min_rice, max_rice), col = color_palette, breaks = seq(min_rice, max_rice, by = break_interval), legend = FALSE, axes = FALSE)
+  # Add region boundaries
+  plot(tza1, add = TRUE, border = "black", lwd = 0.1)
+  
+  points(training_data, pch = 20, col = "red", cex = 0.5)
+}
+
+# Generate pretty breaks for the legend
+legend_breaks <- pretty(c(min_rice, max_rice), n = 5)
+
+# Reset plot layout to 1x1 for the legend
+layout(matrix(1)) 
+
+# Set margins for the legend
+par(mar = c(5, 4, 2, 1))  
+
+# Plot the legend in the bottom row, centered horizontally
+image.plot(zlim = c(min_rice, max_rice), legend.only = TRUE, 
+           col = color_palette, horizontal = TRUE,
+           legend.width = 0.7, legend.shrink = 0.9, 
+           axis.args = list(at = legend_breaks, labels = legend_breaks, cex.axis = 0.9), 
+           legend.args = list(text = "Predicted Rice Price (Tsh) Per Kg", side = 1, line = 2, cex = 0.9))
+
+```
+
+### Predicted Sorghum Prices
+```{r}
+# Function to predict sorghum prices for a given month
+predict_for_sorghum <- function(month) {
+  rain_sum_lag <- rstack3[paste0("2024-", sprintf("%02d", month), "-01_rain.sum.lag")]
+  names(rain_sum_lag) <- "rain.sum.lag"
+  
+  newstack <- c(rstack, rain_sum_lag)
+  
+  const_sorghum <- data.frame(
+    maize = 0, rice = 0, sorghum = 1, bmillet = 0, fmillet = 0, wheat = 0, beans = 0, potato = 0,
+    Month = month,
+    Year = 2023
+  )
+  
+  pred <- predict(newstack, rf, const = const_sorghum, na.rm = TRUE)
+  pred <- mask(pred, tza1)
+  return(pred)
+}
+
+# Create predictions for all months
+predictions_sorghum <- lapply(1:10, predict_for_sorghum)
+
+# Extract pixel values from predictions_sorghum
+sorghum_values <- unlist(lapply(predictions_sorghum, values))
+min_sorghum <- min(sorghum_values, na.rm = TRUE)
+max_sorghum <- max(sorghum_values, na.rm = TRUE)
+
+# Define the continuous color palette and reverse it
+color_palette <- rev(terrain.colors(100))
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+
+break_interval <- 300 
+
+# Loop through each month to plot sorghum prices
+par(mar = c(0, 0, 0, 0))
+for (i in 1:10) {
+  plot(predictions_sorghum[[i]], main = paste("Sorghum prices", toupper(i), year), 
+       zlim = c(min_sorghum, max_sorghum), col = color_palette, breaks = seq(min_sorghum, max_sorghum, by = break_interval), legend = FALSE, axes = FALSE)
+  # Add region boundaries
+  plot(tza1, add = TRUE, border = "black", lwd = 0.1)
+  
+  points(training_data, pch = 20, col = "red", cex = 0.5)
+}
+
+# Generate pretty breaks for the legend
+legend_breaks <- pretty(c(min_sorghum, max_sorghum), n = 5)
+
+# Reset plot layout to 1x1 for the legend
+layout(matrix(1))  
+
+# Set margins for the legend
+par(mar = c(5, 4, 2, 1))  
+
+# Plot the legend in the bottom row, centered horizontally
+image.plot(zlim = c(min_sorghum, max_sorghum), legend.only = TRUE, 
+           col = color_palette, horizontal = TRUE,
+           legend.width = 0.7, legend.shrink = 0.9, 
+           axis.args = list(at = legend_breaks, labels = legend_breaks, cex.axis = 0.9), 
+           legend.args = list(text = "Predicted Sorghum Price (Tsh) Per Kg", side = 1, line = 2, cex = 0.9))
+
+```
+
+### Predicted Bulrush Millet Prices
+```{r}
+# bmillet
+# Function to predict bmillet prices for a given month
+predict_for_bmillet <- function(month) {
+  rain_sum_lag <- rstack3[paste0("2024-", sprintf("%02d", month), "-01_rain.sum.lag")]
+  names(rain_sum_lag) <- "rain.sum.lag"
+  
+  newstack <- c(rstack, rain_sum_lag)
+  
+  const_bmillet <- data.frame(
+    maize = 0, rice = 0, sorghum = 0, bmillet = 1, fmillet = 0, wheat = 0, beans = 0, potato = 0,
+    Month = month,
+    Year = year
+  )
+  
+  pred <- predict(newstack, rf, const = const_bmillet, na.rm = TRUE)
+  pred <- mask(pred, tza1)
+  return(pred)
+}
+
+# Create predictions for all months
+predictions_bmillet <- lapply(1:10, predict_for_bmillet)
+
+
+# Extract pixel values from predictions_bmillet
+bmillet_values <- unlist(lapply(predictions_bmillet, values))
+min_bmillet <- min(bmillet_values, na.rm = TRUE)
+max_bmillet <- max(bmillet_values, na.rm = TRUE)
+
+# Define the continuous color palette and reverse it
+color_palette <- rev(terrain.colors(100))
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout with an extra row for the legend
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+
+# Loop through each month to plot bmillet prices
+break_interval <- 150 
+par(mar = c(0, 0, 0, 0)) 
+for (i in 1:10) {
+  plot(predictions_bmillet[[i]], main = paste("Bmillet prices", toupper(i), year), 
+       zlim = c(min_bmillet, max_bmillet), col = color_palette, 
+       breaks = seq(min_bmillet, max_bmillet, by = break_interval), 
+       legend = FALSE, axes = FALSE)
+  # Add region boundaries
+  plot(tza1, add = TRUE, border = "black", lwd = 0.1)
+  
+  points(training_data, pch = 20, col = "red", cex = 0.5)
+}
+
+# Generate pretty breaks for the legend
+legend_breaks <- pretty(c(min_bmillet, max_bmillet), n = 5) 
+
+# Reset plot layout to 1x1 for the legend
+layout(matrix(1))  
+
+# Set margins for the legend
+par(mar = c(5, 4, 2, 1))
+
+# Plot the legend in the bottom row, centered horizontally
+image.plot(zlim = c(min_bmillet, max_bmillet), legend.only = TRUE, 
+           col = color_palette, horizontal = TRUE,
+           legend.width = 0.7, legend.shrink = 0.9, 
+           axis.args = list(at = legend_breaks, labels = legend_breaks, cex.axis = 0.9), 
+           legend.args = list(text = "Predicted Bulrush Millet Price (Tsh) Per Kg", side = 1, line = 2, cex = 0.9))
+
+```
+
+### Predicted Finger Millet Prices
+```{r}
+#fmillet
+# Function to predict fmillet prices for a given month
+predict_for_fmillet <- function(month) {
+  rain_sum_lag <- rstack3[paste0("2024-", sprintf("%02d", month), "-01_rain.sum.lag")]
+  names(rain_sum_lag) <- "rain.sum.lag"
+  
+  newstack <- c(rstack, rain_sum_lag)
+  
+  const_fmillet <- data.frame(
+    maize = 0, rice = 0, sorghum = 0, bmillet = 0, fmillet = 1, wheat = 0, beans = 0, potato = 0,
+    Month = month,
+    Year = year
+  )
+  
+  pred <- predict(newstack, rf, const = const_fmillet, na.rm = TRUE)
+  pred <- mask(pred, tza1)
+  return(pred)
+}
+
+# Create predictions for all months
+predictions_fmillet <- lapply(1:10, predict_for_fmillet)
+
+# Extract pixel values from predictions_fmillet
+fmillet_values <- unlist(lapply(predictions_fmillet, values))
+min_fmillet <- min(fmillet_values, na.rm = TRUE)
+max_fmillet <- max(fmillet_values, na.rm = TRUE)
+
+# Define the continuous color palette and reverse it
+color_palette <- rev(terrain.colors(100))
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout with an extra row for the legend
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+
+# Loop through each month to plot fmillet prices
+break_interval <- 300 
+par(mar = c(0, 0, 0, 0))
+for (i in 1:10) {
+  plot(predictions_fmillet[[i]], main = paste("Fmillet prices", toupper(i), year), 
+       zlim = c(min_fmillet, max_fmillet), col = color_palette, 
+       breaks = seq(min_fmillet, max_fmillet, by = break_interval), 
+       legend = FALSE, axes = FALSE)
+  # Add region boundaries
+  plot(tza1, add = TRUE, border = "black", lwd = 0.1)
+  
+  points(training_data, pch = 20, col = "red", cex = 0.5)
+}
+
+# Generate pretty breaks for the legend
+legend_breaks <- pretty(c(min_fmillet, max_fmillet), n = 3)  
+
+# Reset plot layout to 1x1 for the legend
+layout(matrix(1))  
+
+# Set margins for the legend
+par(mar = c(5, 4, 2, 1))  
+
+# Plot the legend in the bottom row, centered horizontally
+image.plot(zlim = c(min_fmillet, max_fmillet), legend.only = TRUE, 
+           col = color_palette, horizontal = TRUE,
+           legend.width = 0.7, legend.shrink = 0.9, 
+           axis.args = list(at = legend_breaks, labels = legend_breaks, cex.axis = 0.9), 
+           legend.args = list(text = "Predicted Finger Millet Price (Tsh) Per Kg", side = 1, line = 2, cex = 0.9))
+
+```
+
+### Predicted Wheat Prices
+```{r}
+#Wheat
+# Function to predict wheat prices for a given month
+predict_for_wheat <- function(month) {
+  rain_sum_lag <- rstack3[paste0("2024-", sprintf("%02d", month), "-01_rain.sum.lag")]
+  names(rain_sum_lag) <- "rain.sum.lag"
+  
+  newstack <- c(rstack, rain_sum_lag)
+  
+  const_wheat <- data.frame(
+    maize = 0, rice = 0, sorghum = 0, bmillet = 0, fmillet = 0, wheat = 1, beans = 0, potato = 0,
+    Month = month,
+    Year = year
+  )
+  
+  pred <- predict(newstack, rf, const = const_wheat, na.rm = TRUE)
+  pred <- mask(pred, tza1)
+  return(pred)
+}
+
+# Create predictions for all months
+predictions_wheat <- lapply(1:10, predict_for_wheat)
+# Extract pixel values from predictions_wheat
+wheat_values <- unlist(lapply(predictions_wheat, values))
+min_wheat <- min(wheat_values, na.rm = TRUE)
+max_wheat <- max(wheat_values, na.rm = TRUE)
+
+# Define the continuous color palette and reverse it
+color_palette <- rev(terrain.colors(100))
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+# Define the break interval for both plot and legend
+break_interval <- 100
+
+# Loop through each month to plot wheat prices
+par(mar = c(0, 0, 0, 0))
+for (i in 1:10) {
+  plot(predictions_wheat[[i]], main = paste("Wheat prices", toupper(i), year), 
+       zlim = c(min_wheat, max_wheat), col = color_palette, 
+       breaks = seq(min_wheat, max_wheat, by = break_interval), 
+       legend = FALSE, axes = FALSE)
+  # Add region boundaries
+  plot(tza1, add = TRUE, border = "black", lwd = 0.1)
+  
+  points(training_data, pch = 20, col = "red", cex = 0.5)
+}
+
+# Generate pretty breaks for the legend
+legend_breaks <- pretty(c(min_wheat, max_wheat), n = 5)
+
+# Reset plot layout to 1x1 for the legend
+layout(matrix(1))  
+
+# Set margins for the legend
+par(mar = c(5, 4, 2, 1))  
+
+# Plot the legend in the bottom row, centered horizontally
+image.plot(zlim = c(min_wheat, max_wheat), legend.only = TRUE, 
+           col = color_palette, horizontal = TRUE,
+           legend.width = 0.7, legend.shrink = 0.9, 
+           axis.args = list(at = legend_breaks, labels = legend_breaks, cex.axis = 0.9), 
+           legend.args = list(text = "Predicted Wheat Price (Tsh) Per Kg", side = 1, line = 2, cex = 0.9))
+```
+
+## Predicted potato prices
+```{r}
+#potatoes
+# Function to predict potato prices for a given month
+predict_for_potato <- function(month) {
+  rain_sum_lag <- rstack3[paste0("2024-", sprintf("%02d", month), "-01_rain.sum.lag")]
+  names(rain_sum_lag) <- "rain.sum.lag"
+  
+  newstack <- c(rstack, rain_sum_lag)
+  
+  const_potato <- data.frame(
+    maize = 0, rice = 0, sorghum = 0, bmillet = 0, fmillet = 0, wheat = 0, beans = 0, potato = 1,
+    Month = month,
+    Year = year
+  )
+  
+  pred <- predict(newstack, rf, const = const_potato, na.rm = TRUE)
+  pred <- mask(pred, tza1)
+  return(pred)
+}
+
+# Create predictions for all months
+predictions_potato <- lapply(1:10, predict_for_potato)
+
+# Extract pixel values from predictions_potato
+potato_values <- unlist(lapply(predictions_potato, values))
+min_potato <- min(potato_values, na.rm = TRUE)
+max_potato <- max(potato_values, na.rm = TRUE)
+
+# Define the continuous color palette and reverse it
+color_palette <- rev(terrain.colors(100))
+
+# Set up plot layout with an extra row for the legend
+layout_matrix <- matrix(c(1, 2, 3, 4,
+                          5, 6, 7, 8,
+                          9, 10, 11, 12,
+                          13, 13, 13, 13), nrow = 4, byrow = TRUE)
+
+# Set up layout
+layout(layout_matrix, heights = c(1, 1, 1, 0.5))
+
+# Loop through each month to plot potato prices
+break_interval <- 150
+par(mar = c(0, 0, 0, 0))
+for (i in 1:10) {
+  plot(predictions_potato[[i]], main = paste("Potato prices", toupper(i), year), 
+       zlim = c(min_potato, max_potato), col = color_palette, 
+       breaks = seq(min_potato, max_potato, by = break_interval), 
+       legend = FALSE, axes = FALSE)
+  # Add region boundaries
+  plot(tza1, add = TRUE, border = "black", lwd = 0.1)
+  
+  points(training_data, pch = 20, col = "red", cex = 0.5)
+}
+
+# Generate pretty breaks for the legend
+legend_breaks <- pretty(c(min_potato, max_potato), n = 5)  # Adjust n as needed
+
+# Reset plot layout to 1x1 for the legend
+layout(matrix(1))  
+
+# Set margins for the legend
+par(mar = c(5, 4, 2, 1))  
+# Plot the legend in the bottom row, centered horizontally
+image.plot(zlim = c(min_potato, max_potato), legend.only = TRUE, 
+           col = color_palette, horizontal = TRUE,
+           legend.width = 0.7, legend.shrink = 0.9, 
+           axis.args = list(at = legend_breaks, labels = legend_breaks, cex.axis = 0.9), 
+           legend.args = list(text = "Predicted Potato Price (Tsh) Per Kg", side = 1, line = 2, cex = 0.9))
+```
+
+## Prediction Evaluation
+### 1. Using 2024 Validation data
+```{r}
+pred<-predict(object=rf, newdata=validation_data)
+actual<-validation_data$pkg
+result<-data.frame(actual=actual, predicted=pred)
+```
+
+```{r}
+mse <- mean((actual - pred)^2, na.rm=TRUE)
+paste('Mean Squared Error:', mse)
+```
+
+```{r}
+rmse <- sqrt(mse)
+paste('Root Mean Squared error: ',mean(sqrt(rf$mse)))
+```
+
+```{r}
+#Save predicted & observed price
+write.csv(result, "result.csv")
+```
+
+```{r}
+#reading result.csv file (predicted vs observed)
+rslt <- read.csv("result.csv", header=T)
+print(names(rslt))
+```
+
+```{r}
+#RMSE predicting from rf - predicited vs observed 
+rf.rmse<-round(sqrt(mean( (rslt$actual-rslt$predicted)^2 , na.rm = TRUE )),2)
+print(rf.rmse)
+```
+
+```{r}
+#R-square
+rf.r2<-round(summary(lm(actual~predicted, rslt))$r.squared,2)
+print(rf.r2)
+```
+
+```{r}
+range(actual)
+```
+
+```{r}
+range(pred)
+```
+
+```{r}
+#plotting predicted Vs observed
+ggplot(result, aes(x=actual, y=predicted), alpha=0.6) +
+  geom_point(colour = "blue", size = 1.4, alpha=0.6) +
+  ggtitle('Random Forest "Wholesale Grain Prices in Tanzania"') +
+  scale_x_continuous("Observed Price (Tsh) Per Kg",
+                     limits = c(0, 5000),
+                     breaks = seq(0, 5000, 1000)) +
+  scale_y_continuous("Predicted Price (Tsh) Per Kg",
+                     limits = c(0, 5000),
+                     breaks = seq(0, 5000, 1000)) +
+  theme(axis.line = element_line(colour = "black"),
+        axis.text.y = element_text(size = 8, angle = 90, hjust = 0.5, vjust = 1),
+        axis.text.x = element_text(size = 8)) +
+  geom_abline(intercept = 0, slope = 1, linewidth = 0.5) +
+  geom_smooth(aes(x = actual, y = predicted), formula = y ~ x, method = "lm", se = FALSE, colour = "red", linetype = 2, size = 0.9) +
+  annotate("text", x = 300, y = 4500, label = paste("RMSE:", rf.rmse)) +
+  annotate("text", x = 300, y = 4200, label = paste("R^2: ", rf.r2), parse = TRUE)
+
+```
+
+### 2. Compare the observed Prices (the training data) with the predicted Prices (predicted using the training data) using stats package
+
+```{r}
+library(stats)
+```
+
+```{r}
+mypts_df$pred <- stats::predict(rf)
+```
+
+```{r}
+rsq <- function (obs, pred) cor(obs, pred, use = 'complete.obs') ^ 2
+RMSE <- function(obs, pred){sqrt(mean((pred - obs)^2, na.rm = TRUE))}
+```
+
+```{r}
+fr2_rsq <- rsq(mypts_df$pkg, mypts_df$pred) %>% round(digits = 2)
+fr2_rmse <- RMSE(mypts_df$pkg, mypts_df$pred) %>% round(digits = 0)
+
+```
+
+```{r}
+Price_fit_plot <- ggplot(data = mypts_df, aes(x = pkg, y = pred)) +
+  geom_point(colour = "blue", size = 1.4 ,alpha=0.6) + 
+  ggtitle('Observed vs Predicted "Wholesale Grain Prices in Tanzania"') +
+  geom_abline(slope = 1, alpha=0.3) +
+  annotate('text', x = 150, y = 4500, label = paste0("R^{2}==", fr2_rsq), parse = TRUE, size=3)  +
+  annotate('text', x = 150, y = 4200, label = paste0("RMSE==", fr2_rmse), parse = TRUE, size=3)  +
+  labs(x = "Observed Price (Tsh) Per Kg", y = "Predicted Price (Tsh) Per Kg") +
+  xlim(0, 5000) + ylim(0, 5000)
+Price_fit_plot
+```
+
+# Partial dependence plots
+Plot Partial dependence of all the variables used except food commodities and months.
+```{r}
+library(caret)
+
+var_importance <- varImp(rf)
+
+impvar <- rownames(var_importance)[order(var_importance[, 1], decreasing=TRUE)]
+```
+
+```{r}
+op <- par(mfrow=c(2, 4))
+# exclude food commodities and months
+predictors_to_plot <- setdiff(impvar, c("maize", "rice", "sorghum", "bmillet", "fmillet", "wheat", "beans", "potato", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))
+
+for (i in seq_along(predictors_to_plot)) {
+  partialPlot(rf, as.data.frame(training_data), predictors_to_plot[i], xlab=predictors_to_plot[i],
+              main="Partial Dependence")
+}
+```
+
+## Descriptive statistics for each crop
+```{r}
+# Compute descriptive statistics for each crop
+stats <- mypts %>%
+  filter(pkg > 0) %>%  
+  group_by(Crop) %>%
+  summarise(
+    Mean = mean(pkg, na.rm = TRUE),
+    Median = median(pkg, na.rm = TRUE),
+    Minimum = min(pkg, na.rm = TRUE),
+    Maximum = max(pkg, na.rm = TRUE),
+    Std_Dev = sd(pkg, na.rm = TRUE),
+    IQR = IQR(pkg, na.rm = TRUE),
+    Observations = n()
+  ) %>%
+  arrange(Crop)
+
+print(stats)
+```
+
+
+## correlation Plots
+These are  correlation plots for pooled sample in two periods: post-harvest (May-Oct) and lean season (Nov-April). 
+```{r}
+#We'll use mean Monthly data in wide format
+prices.monthly
+```
+
+```{r}
+# Create a function to determine the season
+get_season <- function(month) {
+  if (month %in% 5:10) {
+    return("Post-Harvest")
+  } else {
+    return("Lean Season")
+  }
+}
+```
+
+```{r}
+# Add a 'Season' column to the data
+prices.monthly$Season <- sapply(prices.monthly$Month, get_season)
+```
+
+```{r}
+# Post Harvest Data
+post_harvest_data <- prices.monthly[prices.monthly$Season == "Post-Harvest", ]
+# Remove rows with NaNs from the Post-Harvest data
+post_harvest_data <- post_harvest_data[complete.cases(post_harvest_data[, 7:14]), ]
+
+# Lean Season data
+lean_season_data <- prices.monthly[prices.monthly$Season == "Lean Season", ]
+# Remove rows with NaNs from the Lean Season data
+lean_season_data <- lean_season_data[complete.cases(lean_season_data[, 7:14]), ]
+```
+
+```{r}
+# Calculate correlation matrix for Post-Harvest season
+post_harvest_corr <- cor(post_harvest_data[, 7:14])
+# Calculate correlation matrix for Lean Season
+lean_season_corr <- cor(lean_season_data[, 7:14])
+```
+
+```{r}
+# Plot correlation matrix for Post-Harvest season
+corrplot(post_harvest_corr, 
+         method = "color",          
+         title = "",                
+         tl.col = "black",          
+         tl.cex = 0.5,             
+         addCoef.col = "black",     
+         number.cex = 0.5,         
+         number.digits = 2) 
+
+# Add title to the plot
+title(main = "Post-Harvest Correlation Matrix", 
+      line = 3,                
+      cex.main = 0.9)
+```
+
+```{r}
+# Plot correlation matrix for Lean Season
+corrplot(lean_season_corr, 
+         method = "color", 
+         title = "",
+         tl.col = "black",       
+         tl.cex = 0.5, 
+         addCoef.col = "black",
+         number.cex = 0.5,
+         number.digits = 2)
+
+# Add title to the plot
+title(main = "Lean Season Correlation Matrix", 
+      line = 3,                
+      cex.main = 0.9) 
+```
+
+
+# Comparing Pooled Vs Crop Specific Price Predictions Using different validation methods
+
+We are comparing pooled vs Crop Specific Price Prediction models to determine which model performs better at prediction. This is done by comparing their prediction's r2 or rmse respectively.
+
+## Function to evaluate models for each crop using 2024 Data as the validation data
+Here we are using 2024 data for validation.
+```{r}
+# Comparison between Pooled model and Crop Specific Model
+set.seed(1983)
+evaluate_models <- function(crop) {
+  # Filter data for the specific crop
+  crop_data <- mypts[mypts$Crop == crop, ]
+  training_data_crop <- crop_data[crop_data$Year %in% c(2021, 2022, 2023), ]
+  training_data_crop <- as.data.frame(training_data_crop)
+  validation_data_crop <- crop_data[crop_data$Year == 2024, ]
+  validation_data_crop <- as.data.frame(validation_data_crop)
+  
+  # Predictions for pooled model on specific crop data
+  pooled_pred_crop <- predict(rf, newdata = validation_data_crop)
+  actual_pooled <- validation_data_crop$pkg
+  result_pooled <-data.frame(actual=actual_pooled, predicted=pooled_pred_crop)
+  
+  # Crop-Specific RF Model
+  rf_crop <- randomForest(pkg ~ Month + Year + ttport_1 + popdens + bio_3 + bio_6 + bio_9 + bio_12 + bio_18 + rain.sum.lag,
+                          data = training_data_crop, na.rm = TRUE)
+  
+  # Predictions for crop-specific model
+  predictions_crop <- predict(rf_crop, newdata = validation_data_crop)
+  actual_crop <- validation_data_crop$pkg
+  result_crop_specific <- data.frame(actual=actual_crop, predicted=predictions_crop)
+  
+  # Calculate performance metrics
+  rmse_pooled <- round(sqrt(mean((result_pooled$actual-result_pooled$predicted)^2 , na.rm = TRUE )),2)
+  r2_pooled <- round(summary(lm(actual~predicted, result_pooled))$r.squared,2)
+  rmse_crop <- round(sqrt(mean((result_crop_specific$actual-result_crop_specific$predicted)^2 , na.rm = TRUE )),2)
+  r2_crop <- round(summary(lm(actual~predicted, result_crop_specific))$r.squared,2)
+  
+  return(data.frame(Crop = crop,
+                    Model = c("Pooled", "Crop-Specific"),
+                    RMSE = c(rmse_pooled, rmse_crop),
+                    R_squared = c(r2_pooled, r2_crop)))
+}
+```
+
+```{r}
+# Apply the function to all crops
+crop <- unique(mypts$Crop)
+comparison_df <- do.call(rbind, lapply(crop, evaluate_models))
+comparison_df
+```
+
+```{r}
+#write.csv(comparison_df, "model_comparison_df.csv")
+```
+
+```{r}
+#comparison_df <- read.csv("model_comparison_df.csv")
+comparison_df_wide <- comparison_df %>%
+  pivot_wider(names_from = Model, values_from = c(RMSE, R_squared)) %>%
+  rename(
+    RMSE_Crop_Specific = `RMSE_Crop-Specific`,
+    RMSE_Pooled = `RMSE_Pooled`,
+    R_squared_Crop_Specific = `R_squared_Crop-Specific`,
+    R_squared_Pooled = `R_squared_Pooled`
+  ) %>%
+  group_by(Crop) %>%
+  summarize(
+    RMSE_Pooled = max(RMSE_Pooled, na.rm = TRUE),
+    RMSE_Crop_Specific = max(RMSE_Crop_Specific, na.rm = TRUE),
+    R_squared_Pooled = max(R_squared_Pooled, na.rm = TRUE),
+    R_squared_Crop_Specific = max(R_squared_Crop_Specific, na.rm = TRUE)
+  )
+```
+
+```{r}
+knitr::kable(comparison_df_wide, caption = "Model Comparison: R² and RMSE")
+```
+
+
+## "train-test split" validation
+Here the dataset is split once (70:30). The model is trained on one part of the data (70%) and evaluated on the remaining set of the data (30%).
+```{r}
+# Pooled RF model
+##Split the data into train and test datasets
+set.seed(1983)
+rows <- sample(x=1:nrow(mypts), size = 0.70* nrow(mypts))
+train <- mypts[rows, ]
+test <- mypts[! rownames(mypts) %in% rows, ]
+
+RF <- randomForest(pkg ~ maize + rice + sorghum + bmillet + fmillet + wheat + beans +
+                     Month +
+                     Year + 
+                     ttport_1 +
+                     popdens +
+                     bio_3 + bio_6 + bio_9 +  bio_12 + bio_18 + 
+                     rain.sum.lag, 
+                   data=train, na.rm=TRUE)
+
+RF
+```
+
+```{r}
+evaluate_models <- function(crop) {
+  # Filter data for the specific crop
+  crop_data <- mypts[mypts$Crop == crop, ]
+  set.seed(1983)
+  rownames(crop_data)<-1:nrow(crop_data)
+  rows <- sample(x=1:nrow(crop_data), size = 0.70* nrow(crop_data))
+  
+  training_data_crop <- crop_data[rows, ]
+
+  validation_data_crop <- crop_data[! rownames(crop_data) %in% rows, ]
+  
+  # Predictions for pooled model on specific crop data
+  pooled_pred_crop <- predict(RF, newdata = validation_data_crop)
+  actual_pooled <- validation_data_crop$pkg
+  result_pooled <-data.frame(actual=actual_pooled, predicted=pooled_pred_crop)
+  
+  # Crop-Specific Model
+  rf_crop <- randomForest(pkg ~ Month + Year + ttport_1 + popdens + bio_3 + bio_6 + bio_9 + bio_12 + bio_18 + rain.sum.lag,
+                          data = training_data_crop, na.rm = TRUE)
+  
+  # Predictions for crop-specific model
+  predictions_crop <- predict(rf_crop, newdata = validation_data_crop)
+  actual_crop <- validation_data_crop$pkg
+  result_crop_specific <- data.frame(actual=actual_crop, predicted=predictions_crop)
+  
+  # Calculate performance metrics
+  rmse_pooled <- round(sqrt(mean((result_pooled$actual-result_pooled$predicted)^2 , na.rm = TRUE )),2)
+  r2_pooled <- round(summary(lm(actual~predicted, result_pooled))$r.squared,2)
+  rmse_crop <- round(sqrt(mean((result_crop_specific$actual-result_crop_specific$predicted)^2 , na.rm = TRUE )),2)
+  r2_crop <- round(summary(lm(actual~predicted, result_crop_specific))$r.squared,2)
+  
+  return(data.frame(Crop = crop,
+                    Model = c("Pooled", "Crop-Specific"),
+                    RMSE = c(rmse_pooled, rmse_crop),
+                    R_squared = c(r2_pooled, r2_crop)))
+}
+
+```
+
+```{r}
+# Apply function to all crops
+crop <- unique(mypts$Crop)
+comparison_df3 <- do.call(rbind, lapply(crop, evaluate_models))
+
+comparison_df3
+```
+
+```{r}
+comparison_df_wide3 <- comparison_df3 %>%
+  pivot_wider(names_from = Model, values_from = c(RMSE, R_squared)) %>%
+  rename(RMSE_Crop_Specific = `RMSE_Crop-Specific`,
+         RMSE_Pooled = `RMSE_Pooled`,
+         R_squared_Crop_Specific = `R_squared_Crop-Specific`,
+         R_squared_Pooled = `R_squared_Pooled`)
+```
+
+```{r}
+knitr::kable(comparison_df_wide3, caption = "Model Comparison: R² and RMSE Based on Train-Test Split Validation")
+```
+
+# Leave-One-Market-Out Cross-Validation
+```{r}
+# Predicting For markets
+mypts <- as.data.frame(mypts)
+
+
+# Initialize a list to store results for each market
+results <- list()
+
+# Get unique markets
+markets <- unique(mypts$Market)
+
+# Loop over each market
+for (market in markets) {
+  
+  # Split data: exclude current market for training, and use current market for validation
+  train_mkts <- mypts %>% filter(Market != market)
+  valid_mkt <- mypts %>% filter(Market == market)
+  
+  # Train Random Forest model on the training data
+  rf_model <- randomForest(pkg ~ maize + rice + sorghum + bmillet + fmillet + wheat + beans + 
+                             jan + feb + mar + apr + may + jun + jul + aug + sep + oct + nov + dec +
+                             Year + ttport_1 + popdens + bio_3 + bio_6 + bio_9 + bio_12 + bio_18 + 
+                             rain.sum.lag, 
+                           data = train_mkts, na.rm = TRUE)
+  
+  # Predict on the validation set for the current market
+  predictions <- predict(rf_model, newdata = valid_mkt)
+  actual <- valid_mkt$pkg
+  
+  # Calculate RMSE and R-squared for the current market
+  rmse <- round(sqrt(mean((actual - predictions)^2, na.rm = TRUE)), 2)
+  r2 <- round(summary(lm(actual ~ predictions))$r.squared, 2)
+  
+  # Store the results in a data frame for the current market
+  results[[market]] <- data.frame(Market = market, RMSE = rmse, R_squared = r2)
+}
+
+# write.csv(results_df, "Results_R2_RMSE.csv")
+```
+
+```{r}
+results_df <- do.call(rbind, results)
+knitr::kable(results_df, caption = "Leave-One-Market-Out Cross-Validation")
+```
+
+```{r}
+# Calculate the mean and standard deviation for RMSE and R-squared
+mean_rmse <- mean(results_df$RMSE)
+sd_rmse <- sd(results_df$RMSE)
+mean_r2 <- mean(results_df$R_squared)
+sd_r2 <- sd(results_df$R_squared)
+```
+
+```{r}
+summary_table <- data.frame(
+  Metric = c("RMSE", "R-squared"),
+  Mean = c(mean_rmse, mean_r2),
+  SD = c(sd_rmse, sd_r2)
+)
+
+knitr::kable(summary_table, caption = "mean and standard deviation for RMSE and R-squared of LOMO-CV")
+```
+
+```{r}
+results_df <- read.csv("Results_R2_RMSE.csv")
+# Convert to spatial data
+cods_vect <- terra::vect(results_df, geom = c("Longitude", "Latitude"), crs = crs(tza1), keepgeom=FALSE)
+
+cods_sf <- sf::st_as_sf(cods_vect)
+
+tza1_sf <- sf::st_as_sf(tza1)
+
+# Plot R^2 values on the Tanzania map
+ggplot(data = tza1_sf) +
+  # Base map with Tanzania's boundaries
+  geom_sf(fill = "white", color = "gray") +
+  
+  # Add market-level points colored and sized by R-squared values
+  geom_sf(data = cods_sf, aes(size = R_squared, color = R_squared), alpha = 0.8) +
+  
+  scale_color_viridis_c(option = "C", name = "R-squared") +
+  
+  scale_size_continuous(range = c(2, 10), name = "R-squared") +
+  
+  guides(
+    size = guide_legend(order = 1),   
+    color = guide_legend(order = 1)   
+  ) +
+  
+  labs(title = "Market-Level R-squared Values",
+       x = "Longitude", y = "Latitude") +
+  
+  theme_minimal()
+```
+
+# Extracting Predicted prices to OSM Point DATA
+The OSM dataset used was obtained from Tanzania Populated Places (OpenStreetMap Export) - https://data.humdata.org/dataset/hotosm_tza_populated_places?
+
+```{r}
+# Extract Predicted price using OSM Data
+# Bring in Tanzania Populated Places from OSM
+TZ_populated_places <- vect("H:\\Tanzania Price data\\Datasets\\OSM_Population\\hotosm_tza_populated_places_points_shp.shp")
+# head(TZ_populated_places)
+# Plot All data points
+plot(tza1)
+plot(TZ_populated_places, col="Red", add=TRUE)
+```
+
+```{r}
+sapply(TZ_populated_places, class)
+# Ensure that the population column is numeric
+TZ_populated_places$population <- as.numeric(TZ_populated_places$population)
+```
+
+```{r}
+# Filter to remain with rows where population is 20,000 or more
+TZ_populated_places_filtered <- TZ_populated_places_filtered <- TZ_populated_places[!is.na(TZ_populated_places$population) & TZ_populated_places$population >= 20000, ]
+```
+
+```{r}
+# Plot places where population data is provided
+plot(tza1)
+plot(TZ_populated_places_filtered, col="Red", add=TRUE)
+```
+
+```{r}
+# Read the predicted price raster data for Maize
+output_dir_Maize <- "H:/Tanzania Price data/Datasets/Pred-plots/Maize"
+
+Maize_price_list <- list.files(output_dir_Maize, pattern = ".tif$", full.names = TRUE)
+Maize_price_list
+Maize_price_rast <- rast(Maize_price_list)
+```
+
+```{r}
+# Extract predicted maize prices for OSM points
+osm_points_with_prices <- TZ_populated_places_filtered  
+
+# Loop over each month and extract the maize price for OSM points
+for (i in 1:nlyr(Maize_price_rast)) {
+  # Extract prices for month i
+  prices_for_month <- terra::extract(Maize_price_rast[[i]], TZ_populated_places_filtered, method = "bilinear")
+  
+  # Add the extracted prices to the SpatVector (each month as a separate column)
+  osm_points_with_prices[[paste0("maize_price_month_", sprintf("%02d", i))]] <- prices_for_month[,2]
+}
+```
+
+```{r}
+# Filter to remain only with necessary columns
+osm_points_with_prices_select <- osm_points_with_prices[, c("name",
+"place", "is_in", "population", "osm_id", "maize_price_month_01", "maize_price_month_02", "maize_price_month_03",  "maize_price_month_04", 
+"maize_price_month_05", "maize_price_month_06", "maize_price_month_07", 
+"maize_price_month_08")]
+```
+
+```{r}
+osm_points_with_prices_select <- as.data.frame(osm_points_with_prices_select)
+
+# Reshape to long format with a Month and price columns
+osm_points_long <- osm_points_with_prices_select %>%
+  pivot_longer(cols = starts_with("maize_price_month_"), 
+               names_to = "Month", 
+               values_to = "price")
+```
+
+```{r}
+# Clean month column to extract only the month number
+osm_points_long$Month <- as.numeric(gsub("maize_price_month_", "", osm_points_long$Month))
+
+# Add a new column crop with Maize 
+osm_points_long$crop <- "maize"
+
+osm_points_long <- as.data.table(osm_points_long)
+ppts <- head(osm_points_long, 50)
+```
+
+
+```{r}
+knitr::kable(ppts, caption = "Extracted Maize Prices For Different Markets in Tanzania For the Year 2024")
+```
+
+# Market access
+## Slope 
+```{r}
+# Slope from geodata
+# Extract slope from srtm using terrain function in terra package 
+# tza_alt <- elevation_30s("Tanzania", path=".")
+# Obtain the slope in radians
+# slope_radian <- terrain(tza_alt, "slope", unit="radians", neighbors=8)
+# terra::plot(slope_radian, main = "Slope of Tanzania (Radians)")
+
+# Save slope raster
+# output_dir <- "H:/Tanzania Price data/Datasets/Cost_surface data"
+# output_file <- paste0(output_dir, "/tz_slope_radian.tif")
+#writeRaster(slope_radian, output_file, overwrite = TRUE)
+
+# Set Lambert Azimuthal Equal-Area (LAEA) projection centered on Tanzania
+laea_tz <- "+proj=laea +lat_0=-6 +lon_0=35 +datum=WGS84 +units=m +no_defs"
+
+# Load and reproject slope layer
+slope_radian <- terra::rast("H:/Tanzania Price data/Datasets/Cost_surface data/tz_slope_radian.tif")
+# Reproject to LAEA and set resolution to 500m
+slope_radian_laea <- terra::project(slope_radian, laea_tz, res = 500, 
+                                    filename = "slope_laea_500m.tif", overwrite = TRUE)
+terra::plot(slope_radian_laea, main = "Slope of Tanzania (Radians)")
+```
+
+```{r}
+# Use the slope layer obtained above to create a decay coefficient
+# We use a decay coefficient of 1.5
+# Create slope cost surface
+decay <- 1.5
+slope_cost <- exp(decay * tan(slope_radian_laea))
+names(slope_cost) <- "slope_cost"
+terra::plot(slope_cost, main = "Slope cost")
+```
+
+## Roads
+```{r}
+# Roads Data from OSM
+# Obtain roads data from osmdata. Code is in reagro.
+# roads <- geodata::osm("Tanzania", "highways", ".")
+# writeVector(roads, "H:/Tanzania Price data/Datasets/Cost_surface data/tz_roads.shp", overwrite = TRUE)
+
+# Load and reproject roads
+roads <- terra::vect("H:/Tanzania Price data/Datasets/Cost_surface data/tz_roads.shp")
+# Reproject the roads vector to LAEA
+roads_laea <- terra::project(roads, laea_tz)
+
+terra::plot(slope_radian_laea)
+terra::lines(roads_laea, col="black")
+terra::lines(roads_laea[roads_laea$highway == "primary", ], lwd=4, col="red")
+terra::lines(roads_laea[roads_laea$highway == "secondary", ], lwd=2, col="blue")
+```
+
+### creating roads cost surface
+```{r}
+# Create road cost surface
+# Create road cost surface
+cfile <- "rdcost_laea.tif"
+roadtypes <- c("primary", "secondary", "tertiary")
+
+if (!file.exists(cfile)) {
+  i <- match(roads_laea$highway, roadtypes)
+  roads_laea$speed <- c(0.001, 0.0015, 0.002)[i]
+  rd_cost <- rasterize(roads_laea, slope_radian, field=roads_laea$speed, filename=cfile, overwrite=TRUE)
+} else {
+  rd_cost <- terra::rast(cfile)
+}
+
+
+rd_cost_laea <- terra::project(rd_cost, laea_tz,  res = 500, 
+                               filename = "rd_cost_laea_500m.tif", overwrite = TRUE)
+
+a <- aggregate(rd_cost_laea, 3, min, na.rm=TRUE)
+terra::plot(a, col=c("black", "blue", "red"), main = "Road travel cost (min/m)")
+```
+
+# Land Cover
+```{r}
+# Load land cover layer
+tza_lulc <- terra::rast("H:/Tanzania Price data/Datasets/Cost_surface data/TZ_Land_cover_2021.tif")
+
+plot(tza_lulc, main = "WorldCover 10 m 2021 v200 - landcover classes")
+terra::lines(tza1) 
+```
+
+```{r}
+Table_class <- data.frame(
+  Value = c(10,20,30,40,50,60,70,80,90, 95),
+  LandClass = c("Tree cover",
+                "Shrubland",
+                "Grassland",
+                "Cropland",
+                "Built-up",
+                "Bare/sparse vegetation",
+                "Snow and Ice",
+                "Permanent water bodies",
+                "Herbaceous wetland",
+                "Mangroves"),
+  travel_speeds=c(0.04, 0.02, 0.02, 0.01, 0.01, 0.02, 0.04, 0.11, 0.04, 0.05)
+)
+```
+
+```{r}
+knitr::kable(Table_class, caption = "Land Cover classes (ESA WorldCover 10 m 2021 v200)")
+```
+
+```{r}
+rc <- data.frame(from=unique(tza_lulc)[,1], to=0.02)
+```
+
+```{r}
+rc <- data.frame(from=unique(tza_lulc)[,1], to=0.02)
+# Adjust Reclassification Table Based on the Classes
+#rc <- data.frame(from = Table_class$Value, to = Table_class$travel_speeds)
+# Assign specific travel speeds based on land cover class values
+rc$to[rc$from %in% c(10)] <- 0.04   # Tree cover
+rc$to[rc$from %in% c(20, 30)] <- 0.02  # Shrubland and Grassland
+rc$to[rc$from == 40] <- 0.01  # Cropland
+rc$to[rc$from == 50] <- 0.01  # Built-up
+rc$to[rc$from == 60] <- 0.02  # Bare/sparse vegetation
+rc$to[rc$from == 70] <- 0.04  # Snow and Ice 
+rc$to[rc$from == 80] <- 0.11  # Permanent water bodies
+rc$to[rc$from == 90] <- 0.04  # Herbaceous wetland
+rc$to[rc$from == 95] <- 0.05  # Mangroves
+rc
+```
+
+```{r}
+#reclassifying
+tza_lc_reclass <- classify(tza_lulc, rc)
+```
+
+```{r}
+lcfname <- "lc_cost.tif"
+if (!file.exists(lcfname)) {
+  # first aggregate to about the same spatial resolution
+  lc_cost <- aggregate(tza_lc_reclass, 3, mean)
+  # then resample
+  lc_cost <- resample(lc_cost, slope_radian, filename=lcfname, wopt=list(names="lc_cost"), overwrite=TRUE)
+} else {
+  lc_cost <- rast(lcfname)
+}
+
+
+lc_cost_laea <- terra::project(lc_cost, laea_tz,  res = 500, 
+                               filename = "lc_cost_laea_500m.tif", overwrite = TRUE)
+terra::plot(lc_cost_laea, main = "Off-road travel costs (min/m) based on land cover class")
+```
+
+```{r}
+# Resample to harmonize the resolution
+#lc_cost_resampled <- terra::resample(lc_cost, slope_cost)
+#names(lc_cost_resampled) <- "lc_cost"
+#rd_cost_resample <- terra::resample(rd_cost, slope_cost)
+#names(rd_cost_resample) <- "rd_cost"
+```
+
+```{r}
+# Combine the cost layers
+all_cost <- c(rd_cost_laea, lc_cost_laea)
+#getting the minimum value of each grid cell
+cost <- min(all_cost, na.rm=TRUE)
+cost <- cost * slope_cost
+terra::plot(cost, main="Final cost layer (min/m)")
+```
+
+```{r}
+# Combine the cost layers
+library(gdistance)
+cost <- raster(cost)
+conductance <- 1/cost
+#Creating a transition object
+tran <- transition(conductance, transitionFunction=mean, directions= 8)
+
+tran <- geoCorrection(tran, type="c")
+
+save(trans, file = "H:/Tanzania Price data/Datasets/Cost_surface data/transition.rda")
+```
+
+```{r}
+# Towns of 20,000 people or more from OSM
+town <- terra::vect("H:/Tanzania Price data/Datasets/Cost_surface data/tz_towns.shp")
+# Project the towns to match the CRS of slope_radian
+town_prj <- project(town, crs(slope_cost))
+# geom(town_prj)
+# Extracting coordinates and population from the projected towns
+towns <- data.frame(
+  x = geom(town_prj)[, 3],  
+  y = geom(town_prj)[, 4],  
+  population = town_prj$population  # Population from the projected towns
+)
+# towns
+```
+
+```{r}
+#convert to spatial points needed in gdistance
+spTowns <- SpatialPoints(cbind(towns$x, towns$y))
+spTowns
+```
+
+## Estimating Access to Markets
+```{r}
+#Estimating
+Ac <- accCost(tran, fromCoords=spTowns)
+A <- rast(Ac) / 60
+AA <- clamp(A, 0, 24) |> mask(slope_radian_laea)
+```
+
+```{r}
+terra::plot(AA, main="Access to markets (towns > 20k) in Tanzania (hrs)")
+terra::lines(roads_laea)
+terra::points(town_prj, col="red", pch=20, cex=1.0)
+```
+
+# Estimating farmgate prices for Tanzania"
+```{r}
+#Load trans object that was created
+load("H:/Tanzania Price data/Datasets/Cost_surface data/transition.rda")
+terra::plot(raster(tran), main='Transition matrix (minutes)')
+terra::plot(town_prj, col = "red", cex = 0.5, add=TRUE)
+```
+
+```{r}
+# We'll use towns our >20k from OSM
+town1 <- terra::vect("H:/Tanzania Price data/Datasets/Cost_surface data/tz_towns.shp")
+```
+
+## Calculating farmgate prices
+```{r}
+# Extract predicted maize prices for OSM points
+# Lets use January Maize price for now
+maize_price_jan <- rast("H:\\Tanzania Price data\\Datasets\\Pred-plots\\Maize\\maize_price_rf_pred_01.tif")
+maize_price_jan_laea <- terra::project(maize_price_jan, laea_tz, res = 500)
+maize_price_jan_osm <- terra::extract(maize_price_jan_laea, town_prj, fun=mean, buffer=2500, small=TRUE)
+# the extract function is returning some NA values, complete the list with a mean of the other values
+price_values <- maize_price_jan_osm[, 2]  
+# Replace NAs with the mean of the non-NA values
+maize_price_jan_osm[, 2][is.na(price_values)] <- mean(price_values, na.rm = TRUE)
+head(maize_price_jan_osm)
+```
+
+```{r}
+library(sp)
+town_prj[["maipkg"]] <- maize_price_jan_osm$lyr1
+town_sp <- as(town_prj, "Spatial")
+```
+
+### Calculate
+```{r}
+#transportation cost. I converted 0.02 usd/kg/h to TZS/kg/hr = 54.43 
+tr_cost <- 54.43 #TZS/kg/hr
+
+# Folder to store temporary rasters
+temp_dir <- "H:/Tanzania Price data/Datasets/Cost_surface data/Temp_fgate_rasters/"
+
+if (!dir.exists(temp_dir)) {
+  dir.create(temp_dir, recursive = TRUE)
+}
+
+# Loop to calculate and save each farmgate price raster
+for (x in seq_along(town_sp)) {
+  tmp.acc <- accCost(tran, town_sp[x,]) / 60
+  market_price <- as.data.frame(town_sp)[x, "maipkg"]
+
+  # Calculate farmgate price
+  fgate_price <- market_price - (54.43 * tmp.acc)
+  fgate_price[fgate_price < 0] <- 0
+
+  # Save each raster to disk with a unique filename
+  save_path <- paste0(temp_dir, "fgate_price_", x, ".tif")
+  terra::writeRaster(fgate_price, save_path, overwrite = TRUE)
+}
+
+# Read all saved rasters back into a list
+raster_files <- list.files(temp_dir, pattern = "\\.tif$", full.names = TRUE)
+fgate_rasters <- lapply(raster_files, terra::rast)
+
+# Combine all rasters into a single SpatRaster stack
+mystack_spat <- do.call(c, fgate_rasters)
+```
+
+```{r}
+
+fgate_price <- max(mystack_spat) %>% resample(.,maize_price_jan_laea)  %>% mask(.,maize_price_jan_laea)
+maize_price_jan_laea; fgate_price
+terra::compareGeom(maize_price_jan_laea, fgate_price)
+```
+
+```{r}
+names(fgate_price) <- "Farm_Gate_Price"
+
+plot(fgate_price, main="Farm gate prices Jan 2024")
+```
+
+```{r}
+names(maize_price_jan_laea) <- "Pred_Maize_price_jan"
+maize_values_jan <- terra::values(maize_price_jan_laea, na.rm = TRUE)
+# Get minimum and maximum values
+min_maize_jan <- min(maize_values_jan, na.rm = TRUE)
+max_maize_jan <- max(maize_values_jan, na.rm = TRUE)
+# Define the break interval for plotting
+break_interval <- 100
+breaks_seq <- seq(min_maize_jan, max_maize_jan, by = break_interval)
+color_palette <- rev(terrain.colors(100))
+# Plot 
+terra::plot(
+  maize_price_jan_laea, 
+  main = "Predicted Maize Price Jan 2024", 
+  zlim = c(min_maize_jan, max_maize_jan), 
+  col = color_palette, 
+  breaks = breaks_seq
+)
+```
+
+```{r}
+# Set up the layout for 2 plots side by side
+par(mfrow = c(1, 2), mar = c(4, 4, 2, 1)) 
+
+# Plot Maize Price
+plot(
+  maize_price_jan_laea,
+  main = "Predicted Maize Price Jan 2024",
+  zlim = c(min_maize_jan, max_maize_jan),
+  col = color_palette,
+  breaks = breaks_seq
+)
+
+# Plot Farm Gate Price
+plot(fgate_price, main="Farm gate prices Jan 2024")
+```
+
+
+
+
