@@ -9,7 +9,8 @@ To address this, the study develops and tests a spatially explicit machine learn
 
 # Repository Structure
 # 1 Data
-This folder contains the cleaned market price data used for model training and validation. The raw data was sourced from the Tanzania Ministry of Industry and Trade (MIT), and includes monthly wholesale prices for key staple crops reported at various markets across the country. The cleaned dataset ## Tanzania_Price_Data_AllCrops_with_Coordinates4.csv — covers 44 markets and includes these crops: maize, rice, sorghum, bulrush millet, finger millet, wheat, beans, and potatoes.
+This folder contains the cleaned market price data used for model training and validation. The raw data was sourced from the Tanzania Ministry of Industry and Trade (MIT), and includes monthly wholesale prices for key staple crops reported at various markets across the country. The cleaned dataset 
+## Tanzania_Price_Data_AllCrops_with_Coordinates4.csv — covers 44 markets and includes these crops: maize, rice, sorghum, bulrush millet, finger millet, wheat, beans, and potatoes.
 
 This folder also includes the spatio-temporal raster outputs for all the crops listed above, generated from the prediction models. These outputs provide monthly price surface maps that estimate wholesale crop prices at high spatial resolution across rural Tanzania.
 
