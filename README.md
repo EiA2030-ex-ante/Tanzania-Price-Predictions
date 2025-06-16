@@ -9,18 +9,14 @@ To address this, the study develops and tests a spatially explicit machine learn
 
 # Repository Structure
 # 1 Data
-This folder contains the cleaned market price data used for model training and validation. The raw data was sourced from the Tanzania Ministry of Industry and Trade (MIT), and includes monthly wholesale prices for key staple crops reported at various markets across the country. The cleaned dataset 
-## Tanzania_Price_Data_AllCrops_with_Coordinates4.csv — covers 44 markets and includes these crops: maize, rice, sorghum, bulrush millet, finger millet, wheat, beans, and potatoes.
+This folder contains the cleaned market price data used for model training and validation. The raw data was sourced from the Tanzania Ministry of Industry and Trade (MIT), and includes monthly wholesale prices for key staple crops reported at various markets across the country. The cleaned dataset as csv -Tanzania_Price_Data_AllCrops_with_Coordinates4.csv. It covers 44 markets and includes these crops: maize, rice, sorghum, bulrush millet, finger millet, wheat, beans, and potatoes.
 
-This folder also includes the spatio-temporal raster outputs for all the crops listed above, generated from the prediction models. These outputs provide monthly price surface maps that estimate wholesale crop prices at high spatial resolution across rural Tanzania.
+This folder also includes the spatio-temporal raster outputs for all the crops listed above, generated from the prediction models. These outputs provide monthly price surface maps for 2024 that estimate wholesale crop prices at high spatial resolution across rural Tanzania.
 
 # 2. Code
 This folder contains the R Markdown (.Rmd) file that document the full workflow—from data cleaning and preprocessing to model fitting, validation, and prediction. The code includes Random Forest model training, spatial cross-validation routines (e.g., leave-N-markets-out), and the generation of final monthly price prediction maps.
 
 The entire modeling process is fully reproducible, with results also compiled and published here: https://eia2030-ex-ante.github.io/Tanzania-Price-Predictions/.
-
-# License
-This project is licensed under the Creative Commons Attribution 4.0 International License. See the LICENSE file for details.
 
 # Acknowledgments
 This work was made possible through the OneCGIAR Initiative on Excellence in Agronomy (INV-005431), as well as through the Guiding Acid Soil Management Investments in Africa (GAIA) project (Grant no: INV-029117), supported by the Bill & Melinda Gates Foundation (BMGF). We would like to thank all funders supporting research through contributions to the CGIAR Trust Fund: https://www.cgiar.org/funders/.
