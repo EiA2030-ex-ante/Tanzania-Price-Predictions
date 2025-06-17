@@ -14,7 +14,7 @@ This folder contains the cleaned market price data used for model training and v
 This folder also includes the spatio-temporal raster outputs for all the crops listed above, generated from the prediction models. These outputs provide monthly price surface maps for 2024 that estimate wholesale crop prices at high spatial resolution across rural Tanzania.
 
 # 2. Code
-This folder contains the R Markdown (.Rmd) file that document the full workflow—from data cleaning and preprocessing to model fitting, validation, and prediction. The code includes Random Forest model training, spatial cross-validation (e.g., leave-N-markets-out), and the generation of final monthly price prediction maps.
+This folder contains the R Markdown (.Rmd) file that documents the full workflow—from data cleaning and preprocessing to model fitting, validation, and prediction. The code includes Random Forest model training, spatial cross-validation (e.g., leave-N-markets-out), and the generation of final monthly price prediction maps.
 
 The entire modeling process is fully reproducible, with results also compiled and published here: https://eia2030-ex-ante.github.io/Tanzania-Price-Predictions/.
 
