@@ -1,4 +1,4 @@
-# Predictive mapping of wholesale grain prices for rural areas in Tanzania
+# Predictive mapping of wholesale crop prices for rural areas in Tanzania
 
 This repository contains the data, data preparation steps, and code used for a study on spatio-temporal prediction of wholesale crop prices for rural areas in Tanzania. This project builds and evaluates Random Forest models to predict monthly crop prices at high spatial resolution. The whole workflow used is compiled in this document- https://eia2030-ex-ante.github.io/Tanzania-Price-Predictions/
 
