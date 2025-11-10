@@ -795,7 +795,7 @@ rf1$importanceSD
 In this section, we aim to refine our model by selecting the most important variables. We will review the importance metrics (%IncMSE and IncNodePurity) to identify the variables that contribute the most to the model's predictive power. Our focus will be on variables with higher importance values to ensure a more efficient and interpretable model.
 ```{r}
 ### Fit The Random Forest Model (2)
-rf <- randomForest(pkg ~ maize + rice + sorghum + bmillet + fmillet + wheat + beans + 
+rf <- randomForest(pkg ~ maize + rice + sorghum + bmillet + fmillet + wheat + beans + potato + 
                      Month + Year + 
                      #latitude + longitude +
                      ttport_1 + ttcity_u5 + popdens + 
@@ -1530,8 +1530,7 @@ imp_plot <- imp %>%
   mutate(
     PrettyVar = recode(Variable, !!!pretty_labels),
     PrettyVar = factor(PrettyVar, levels = PrettyVar)
-  ) %>%
-  slice_head(n = 10)
+  ) 
 
 # Plot
 ggplot(imp_plot, aes(x = PrettyVar, y = .data[[importance_col]])) +
